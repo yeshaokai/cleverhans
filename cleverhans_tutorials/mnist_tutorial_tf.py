@@ -16,7 +16,7 @@ from tensorflow.python.platform import flags
 import logging
 
 from cleverhans.utils_mnist import data_mnist
-from cleverhans.utils_tf import model_train, model_eval
+from cleverhans.utils_tf import model_train, model_eval,model_loss
 from cleverhans.attacks import FastGradientMethod
 from cleverhans_tutorials.tutorial_models import make_basic_cnn
 from cleverhans.utils import AccuracyReport, set_log_level
@@ -26,7 +26,9 @@ import os
 FLAGS = flags.FLAGS
 
 
-def mnist_tutorial(train_start=0, train_end=60000, test_start=0,
+
+
+def mnist_tutorial(train_start=0, train_end=1000, test_start=0,
                    test_end=10000, nb_epochs=6, batch_size=128,
                    learning_rate=0.001,
                    clean_train=True,
@@ -79,21 +81,23 @@ def mnist_tutorial(train_start=0, train_end=60000, test_start=0,
     # Define input TF placeholder
     x = tf.placeholder(tf.float32, shape=(None, 28, 28, 1))
     y = tf.placeholder(tf.float32, shape=(None, 10))
-
+    x2 = tf.placeholder(tf.float32, shape=(None, 28, 28, 1))
+    y2 = tf.placeholder(tf.float32, shape=(None, 10))
     model_path = "models/mnist"
     # Train an MNIST model
     train_params = {
-        'nb_epochs': nb_epochs,
-        'batch_size': batch_size,
+        'nb_epochs': 1,
+        'batch_size': 100,
         'learning_rate': learning_rate
-    }
-    fgsm_params = {'eps': 0.3,
+    }    
+    fgsm_params = {'eps': 0.6,
                    'clip_min': 0.,
                    'clip_max': 1.}
     rng = np.random.RandomState([2017, 8, 30])
 
     if clean_train:
-        model = make_basic_cnn(nb_filters=nb_filters)
+        prune_percent = {'fc1_w':10}
+        model = make_basic_cnn(nb_filters=nb_filters,prune_percent=prune_percent)
         preds = model.get_probs(x)
 
         def evaluate():
@@ -105,9 +109,10 @@ def mnist_tutorial(train_start=0, train_end=60000, test_start=0,
             report.clean_train_clean_eval = acc
             assert X_test.shape[0] == test_end - test_start, X_test.shape
             print('Test accuracy on legitimate examples: %0.4f' % acc)
+        print ("start training")
         model_train(sess, x, y, preds, X_train, Y_train, evaluate=evaluate,
                     args=train_params, rng=rng)
-
+        print ("finish training")
         # Calculate training error
         if testing:
             eval_params = {'batch_size': batch_size}
@@ -117,16 +122,19 @@ def mnist_tutorial(train_start=0, train_end=60000, test_start=0,
 
         # Initialize the Fast Gradient Sign Method (FGSM) attack object and
         # graph
-        fgsm = FastGradientMethod(model, sess=sess)
+
+
+
+        model2 = make_basic_cnn(nb_filters=nb_filters)
+        preds2 = model2.get_probs(x)
+        model_train(sess, x, y, preds2, X_train, Y_train, evaluate=evaluate,
+                    args=train_params, rng=rng)
+        fgsm = FastGradientMethod(model2, sess=sess)
         adv_x = fgsm.generate(x, **fgsm_params)
         preds_adv = model.get_probs(adv_x)
 
-        # Evaluate the accuracy of the MNIST model on adversarial examples
-        eval_par = {'batch_size': batch_size}
-        acc = model_eval(sess, x, y, preds_adv, X_test, Y_test, args=eval_par)
-        print('Test accuracy on adversarial examples: %0.4f\n' % acc)
-        report.clean_train_adv_eval = acc
 
+        
         # Calculate training error
         if testing:
             eval_par = {'batch_size': batch_size}
@@ -134,8 +142,35 @@ def mnist_tutorial(train_start=0, train_end=60000, test_start=0,
                              Y_train, args=eval_par)
             report.train_clean_train_adv_eval = acc
 
-        print("Repeating the process, using adversarial training")
+        print ("start iterative pruning")
+
+        for _ in range(22):
+            dict_nzidx = model.apply_prune(sess)
+            trainer = tf.train.AdamOptimizer(1e-5)
+            preds = model.get_probs(x)
+            loss = model_loss(y,preds)
+            grads = trainer.compute_gradients(loss)            
+            grads = model.apply_prune_on_grads(grads,dict_nzidx)            
+            prune_args = {'trainer':trainer,'grads':grads}
+            train_params = train_params = {
+                'nb_epochs': 4,
+                'batch_size': 100,
+                'learning_rate': 1e-5
+                }
+            model_train(sess, x, y, preds, X_train, Y_train, evaluate=evaluate,
+                    args=train_params, rng=rng,prune_args=prune_args)
+
+
+        #preds = model.get_probs(x)
+           # preds_adv = model.get_probs(adv_x)
+
+        # Evaluate the accuracy of the MNIST model on adversarial examples
+            eval_par = {'batch_size': batch_size}
+            acc = model_eval(sess, x, y, preds_adv, X_test, Y_test, args=eval_par)
+            print('Test accuracy on adversarial examples: %0.4f\n' % acc)            
+    print("Repeating the process, using adversarial training")            
     # Redefine TF model graph
+    '''
     model_2 = make_basic_cnn(nb_filters=nb_filters)
     preds_2 = model_2(x)
     fgsm2 = FastGradientMethod(model_2, sess=sess)
@@ -180,7 +215,7 @@ def mnist_tutorial(train_start=0, train_end=60000, test_start=0,
         report.train_adv_train_adv_eval = accuracy
 
     return report
-
+    '''
 
 def main(argv=None):
     mnist_tutorial(nb_epochs=FLAGS.nb_epochs, batch_size=FLAGS.batch_size,

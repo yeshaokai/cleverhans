@@ -19,6 +19,7 @@ from .utils import set_log_level, get_log_level
 _logger = create_logger("cleverhans.utils.tf")
 
 
+
 def model_loss(y, model, mean=True):
     """
     Define loss of TF graph
@@ -68,7 +69,7 @@ def initialize_uninitialized_global_variables(sess):
 
 def model_train(sess, x, y, predictions, X_train, Y_train, save=False,
                 predictions_adv=None, init_all=True, evaluate=None,
-                verbose=True, feed=None, args=None, rng=None):
+                verbose=True, feed=None, args=None, rng=None,prune_args=None):
     """
     Train a TF graph
     :param sess: TF session to use when training the graph
@@ -122,12 +123,19 @@ def model_train(sess, x, y, predictions, X_train, Y_train, save=False,
     # Define loss
     loss = model_loss(y, predictions)
     if predictions_adv is not None:
-        loss = (loss + model_loss(y, predictions_adv)) / 2
+        loss = (loss + model_loss(y, predictions_adv)) / 2    
+    train_step = None
+    if not prune_args:
+        train_step = tf.train.AdamOptimizer(learning_rate=args.learning_rate)
+        train_step = train_step.minimize(loss)
+    else:
+        
+        trainer = prune_args['trainer']
+        grads = prune_args['grads']
 
-    train_step = tf.train.AdamOptimizer(learning_rate=args.learning_rate)
-    train_step = train_step.minimize(loss)
-
+        train_step = trainer.apply_gradients(grads)
     with sess.as_default():
+        '''
         if hasattr(tf, "global_variables_initializer"):
             if init_all:
                 tf.global_variables_initializer().run()
@@ -137,7 +145,10 @@ def model_train(sess, x, y, predictions, X_train, Y_train, save=False,
             warnings.warn("Update your copy of tensorflow; future versions of "
                           "CleverHans may drop support for this version.")
             sess.run(tf.initialize_all_variables())
-
+        '''
+        for var in tf.global_variables():
+                if tf.is_variable_initialized(var).eval() == False:
+                    sess.run(tf.variables_initializer([var]))
         for epoch in xrange(args.nb_epochs):
             # Compute number of batches
             nb_batches = int(math.ceil(float(len(X_train)) / args.batch_size))
@@ -166,6 +177,7 @@ def model_train(sess, x, y, predictions, X_train, Y_train, save=False,
                 _logger.info("Epoch " + str(epoch) + " took " +
                              str(cur - prev) + " seconds")
             if evaluate is not None:
+
                 evaluate()
 
         if save:
