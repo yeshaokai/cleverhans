@@ -62,11 +62,9 @@ class PruneableMLP(MLP):
         pcen = np.percentile(abs(non_zero_weight_arr),percent)
         print ("percentile " + str(pcen))
         under_threshold = abs(weight_arr)< pcen
-        before = len(non_zero_weight_arr)
         weight_arr[under_threshold] = 0
-        non_zero_weight_arr = weight_arr[weight_arr!=0]
-        after = len(non_zero_weight_arr)
-        above_threshold = abs(weight_arr)>= pcen
+        above_threshold = weight_arr!=0
+#        weight_arr[above_threshold]+=0.1*weight_arr[above_threshold]
         return [above_threshold,weight_arr]
 
     def apply_prune(self,sess):
@@ -83,7 +81,7 @@ class PruneableMLP(MLP):
                       continue
                   print ("before pruning #non zero parameters " + str(np.sum(weight_arr!=0)))
                   before = np.sum(weight_arr!=0)
-                  mask,weight_arr_pruned = self.random_pruning(weight_arr,layer.weight_name)
+                  mask,weight_arr_pruned = self.prune_weight(weight_arr,layer.weight_name)
                   after = np.sum(weight_arr_pruned!=0)
                   print ("pruned "+ str(before-after))
 
@@ -111,7 +109,30 @@ class PruneableMLP(MLP):
                     grads_and_vars[count] = (tf.multiply(nzidx_obj, grad), var)
                 count += 1
         return grads_and_vars
+    def inhibition(self,sess,eps=0.1):
+        for layer in self.layers:
+            if layer.weight_name in self.prune_percent:
+                print ("at %s do inhibition"% (layer.weight_name))
+                weight_arr = None
+                if isinstance(layer,Conv2D):
+                    weight_arr = sess.run(layer.kernels)
+                elif isinstance(layer,Linear):
+                    weight_arr = sess.run(layer.W)
+                else:
+                    continue
+                temp = np.zeros(weight_arr.shape)
+                temp[weight_arr>0] = 1
+                temp[weight_arr<0] = -1
+                weight_arr += temp*eps
+                if isinstance(layer,Conv2D):
+                    sess.run(layer.kernels.assign(weight_arr))
+                elif isinstance(layer,Linear):
 
+                    sess.run(layer.W.assign(weight_arr))
+                else:
+                    continue
+            
+        
     def random_pruning(self,weight_arr,weight_name):
         # double the percent                                                                                                                  
         # make the random selection                                                                                                           
@@ -243,12 +264,14 @@ def make_basic_cnn(nb_filters=64, nb_classes=10,
                    input_shape=(None, 28, 28, 1),prune_percent=None):
     layers = [Conv2D(nb_filters, (8, 8), (2, 2), "SAME",name='conv1_w'),
               ReLU(),
-              Conv2D(nb_filters * 2, (6, 6), (2, 2), "VALID"),
+              Conv2D(nb_filters * 2, (6, 6), (2, 2), "VALID",name='conv2_w'),
               ReLU(),
-              Conv2D(nb_filters * 2, (5, 5), (1, 1), "VALID"),
+              Conv2D(nb_filters * 2, (5, 5), (1, 1), "VALID",name='conv3_w'),
               ReLU(),
               Flatten(),
-              Linear(nb_classes,name='fc1_w'),
+              Linear(1280,name='fc1_w'),
+              Linear(1280,name='fc2_w'),
+              Linear(nb_classes,name='fc3_w'),
               Softmax()]
 
     model = PruneableMLP(layers, input_shape,prune_percent=prune_percent)
