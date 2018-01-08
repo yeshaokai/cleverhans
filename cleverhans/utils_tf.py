@@ -129,7 +129,11 @@ def model_train(sess, x, y, predictions, X_train, Y_train, save=False,
         train_step = tf.train.AdamOptimizer(learning_rate=args.learning_rate)
         train_step = train_step.minimize(loss)
     else:
-        
+        '''
+        trainer = tf.train.AdamOptimizer(learning_rate = args.learning_rate)
+        grads = trainer.compute_gradients(loss)
+        grads = model.a
+        '''
         trainer = prune_args['trainer']
         grads = prune_args['grads']
 
@@ -146,9 +150,16 @@ def model_train(sess, x, y, predictions, X_train, Y_train, save=False,
                           "CleverHans may drop support for this version.")
             sess.run(tf.initialize_all_variables())
         '''
+        import time
+        start = time.time()
+        '''
         for var in tf.global_variables():
                 if tf.is_variable_initialized(var).eval() == False:
                     sess.run(tf.variables_initializer([var]))
+        '''
+        initialize_uninitialized_global_variables(sess)
+        end = time.time()
+        print ('initialization takes %f' %(end - start))
         for epoch in xrange(args.nb_epochs):
             # Compute number of batches
             nb_batches = int(math.ceil(float(len(X_train)) / args.batch_size))

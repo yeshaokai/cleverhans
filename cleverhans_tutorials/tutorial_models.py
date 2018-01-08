@@ -123,7 +123,7 @@ class PruneableMLP(MLP):
                 temp = np.zeros(weight_arr.shape)
                 temp[weight_arr>0] = 1
                 temp[weight_arr<0] = -1
-                weight_arr += temp*eps
+                weight_arr += temp*0.1
                 if isinstance(layer,Conv2D):
                     sess.run(layer.kernels.assign(weight_arr))
                 elif isinstance(layer,Linear):

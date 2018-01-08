@@ -14,8 +14,10 @@ import numpy as np
 import tensorflow as tf
 from tensorflow.python.platform import flags
 import logging
-import time 
+
 from cleverhans.utils_mnist import data_mnist
+from keras.datasets import cifar10
+
 from cleverhans.utils_tf import model_train, model_eval,model_loss
 from cleverhans.attacks import FastGradientMethod
 from cleverhans.attacks import SaliencyMapMethod
@@ -151,34 +153,28 @@ def mnist_tutorial(train_start=0, train_end=60000, test_start=0,
         learning_rate = 5e-4
         inhibition_eps = 10
         print ("learning rate %f iteration %d prune factor %d AE eps %f inhibition eps %f" %(learning_rate,iterations,prune_factor,eps,inhibition_eps))
-        
-        preds = model.get_probs(x)
-        loss = model_loss(y,preds)
-
         for i in range(iterations):
+
             print ("iterative %d"  % (i))
-            start = time.time()
             dict_nzidx = model.apply_prune(sess)
+
             trainer = tf.train.AdamOptimizer(learning_rate)
+            preds = model.get_probs(x)
+            loss = model_loss(y,preds)
             grads = trainer.compute_gradients(loss)            
             grads = model.apply_prune_on_grads(grads,dict_nzidx)
-            end = time.time()
-            print ('until grad compute elpased %f' % (end-start))
             prune_args = {'trainer':trainer,'grads':grads}
             train_params = {
                 'nb_epochs':2,
                 'batch_size': batch_size,
                 'learning_rate': 1e-3
                 }
-            start = time.time()
             model_train(sess, x, y, preds, X_train, Y_train, evaluate=evaluate,
                     args=train_params, rng=rng,prune_args=prune_args)
-            end = time.time()
-            print ('model_train function takes %f' % (end-start))
+
             eval_par = {'batch_size': batch_size}
             acc = model_eval(sess, x, y, preds_adv, X_test, Y_test, args=eval_par)
             print('Test accuracy on adversarial examples: %0.4f\n' % acc)
-
         model.inhibition(sess,inhibition_eps)
         eval_par = {'batch_size': batch_size}
         acc = model_eval(sess, x, y, preds_adv, X_test, Y_test, args=eval_par)
