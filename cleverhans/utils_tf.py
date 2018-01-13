@@ -162,6 +162,7 @@ def model_train(sess, x, y, predictions, X_train, Y_train, save=False,
         print ('initialization takes %f' %(end - start))
         for epoch in xrange(args.nb_epochs):
             # Compute number of batches
+            print (" one epoch")
             nb_batches = int(math.ceil(float(len(X_train)) / args.batch_size))
             assert nb_batches * args.batch_size >= len(X_train)
 

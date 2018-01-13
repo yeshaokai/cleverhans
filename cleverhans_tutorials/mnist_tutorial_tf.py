@@ -78,7 +78,8 @@ def mnist_tutorial(train_start=0, train_end=60000, test_start=0,
                                                   train_end=train_end,
                                                   test_start=test_start,
                                                   test_end=test_end)
-
+    print (Y_train.shape)
+    print (Y_test[0])
     # Use label smoothing
     assert Y_train.shape[1] == 10
     label_smooth = .1
@@ -104,8 +105,9 @@ def mnist_tutorial(train_start=0, train_end=60000, test_start=0,
     prune_factor = 10
     conv_prune_factor = 5
     if clean_train:
-        prune_percent = {'conv1_w':3,'conv2_w':3,'conv3_w':3,'fc1_w':10,'fc2_w':10,'fc3_w':10}
+        prune_percent = {'fc1_w':10,'fc2_w':10,'fc3_w':10}
         model = make_basic_cnn(nb_filters=nb_filters,prune_percent=prune_percent)
+        
         preds = model.get_probs(x)
 
         def evaluate():

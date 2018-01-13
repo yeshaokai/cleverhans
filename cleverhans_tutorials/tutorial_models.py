@@ -29,14 +29,15 @@ class MLP(Model):
         else:
             layers[-1].name = 'logits'
         for i, layer in enumerate(self.layers):
-            if hasattr(layer, 'name'):
-                name = layer.name
-            else:
-                name = layer.__class__.__name__ + str(i)
-            self.layer_names.append(name)
+            with tf.variable_scope('xixi%d' %(i),reuse = False):
+                if hasattr(layer, 'name'):
+                    name = layer.name
+                else:
+                    name = layer.__class__.__name__ + str(i)
+                self.layer_names.append(name)
 
-            layer.set_input_shape(input_shape)
-            input_shape = layer.get_output_shape()
+                layer.set_input_shape(input_shape)
+                input_shape = layer.get_output_shape()
 
     def fprop(self, x, set_ref=False):
         states = []
@@ -166,6 +167,8 @@ class Linear(Layer):
         self.num_hid = num_hid
         self.weight_name = name
     def set_input_shape(self, input_shape):
+        print ("what")
+        print (input_shape)
         batch_size, dim = input_shape
         self.input_shape = [batch_size, dim]
         self.output_shape = [batch_size, self.num_hid]
@@ -177,15 +180,133 @@ class Linear(Layer):
 
     def fprop(self, x):
         return tf.matmul(x, self.W) + self.b
+class BN(Layer):
+    def __init__(self,in_channel,out_channel,scope = None):
+        self.in_channel = in_channel
+        self.out_channel = out_channel
+        self.output_shape = None
+        self.scope = scope
+    def set_input_shape(self,input_shape):
+        self.input_shape = input_shape
+        lst = list(self.input_shape)
+        lst[-1] = self.out_channel
+        self.output_shape = tuple(lst)
+    def fprop(self,input_layer):
+        BN_EPSILON = 0.001
+        dimension = self.out_channel
+        mean, variance = tf.nn.moments(input_layer, axes=[0, 1, 2])
+        beta = None
+        gamma = None
+        with tf.variable_scope('fpropBN_%s'%self.scope,reuse = tf.AUTO_REUSE):
+            beta = tf.get_variable('beta', dimension, tf.float32,
+                               initializer=tf.constant_initializer(0.0, tf.float32))
+            gamma = tf.get_variable('gamma', dimension, tf.float32,
+                                initializer=tf.constant_initializer(1.0, tf.float32))
 
+        bn_layer = tf.nn.batch_normalization(input_layer, mean, variance, beta, gamma, BN_EPSILON)
+        return bn_layer                        
+        #return batch_normalization_layer(x,self.out_channel,scope = self.scope)
+        
+def bn_relu_conv_layer(input_layer, filter_shape, stride):
+    '''                                                                                                                               
+    A helper function to batch normalize, relu and conv the input layer sequentially                                                  
+    :param input_layer: 4D tensor                                                                                                     
+    :param filter_shape: list. [filter_height, filter_width, filter_depth, filter_number]                                             
+    :param stride: stride size for conv                                                                                               
+    :return: 4D tensor. Y = conv(Relu(batch_normalize(X)))                                                                            
+    '''
 
+    in_channel = input_layer.get_shape().as_list()[-1]
+    
+    bn_layer = batch_normalization_layer(input_layer, in_channel)
+    relu_layer = tf.nn.relu(bn_layer)
+    
+    filter = tf.get_variable(name='conv',shape=filter_shape)#create_variables(name='conv', shape=filter_shape)
+
+    conv_layer = tf.nn.conv2d(relu_layer, filter, strides=[1, stride, stride, 1], padding='SAME')
+    return conv_layer
+def conv_bn_relu_layer(input_layer, filter_shape, stride):
+    '''                                                                                                                               
+    A helper function to conv, batch normalize and relu the input tensor sequentially                                                 
+    :param input_layer: 4D tensor                                                                                                     
+    :param filter_shape: list. [filter_height, filter_width, filter_depth, filter_number]                                             
+    :param stride: stride size for conv                                                                                               
+    :return: 4D tensor. Y = Relu(batch_normalize(conv(X)))                                                                            
+    '''
+
+    out_channel = filter_shape[-1]
+    filter = create_variables(name='conv', shape=filter_shape)
+        
+    conv_layer = tf.nn.conv2d(input_layer, filter, strides=[1, stride, stride, 1], padding='SAME')
+    bn_layer = batch_normalization_layer(conv_layer, out_channel)
+        
+    output = tf.nn.relu(bn_layer)
+    return output
+class residual_block(Layer):
+    def __init__(self,input_channel,output_channel,first_block=False,postfix='yo'):
+        self.postfix = postfix
+        self.output_channel = output_channel
+        self.first_block = first_block
+        self.input_channel = input_channel
+        self.kernel_shape = (3,3)
+        self.increase_dim = None
+        self.tride = None
+    def set_input_shape(self,input_shape):
+        input_layer = tf.zeros(input_shape)
+        if self.input_channel*2 == self.output_channel:
+            self.increase_dim = True
+            self.stride = 2
+        elif self.input_channel == self.output_channel:
+            self.increase_dim = False
+            self.stride = 1
+        else:
+            raise ValueError('Output and input channel does not match in residual blocks!!!')
+
+        with tf.variable_scope('dummy'):
+            if self.first_block:
+                filter = tf.get_variable(name='%s'%self.postfix,shape=[3, 3, self.input_channel, self.output_channel])
+                conv1 = tf.nn.conv2d(input_layer, filter=filter, strides=[1, 1, 1, 1], padding='SAME')
+            else:
+                conv1 = bn_relu_conv_layer(input_layer, [3, 3, self.input_channel, self.output_channel], self.stride)                
+        with tf.variable_scope('dummy_2'):
+            conv2 = bn_relu_conv_layer(conv1, [3, 3, self.output_channel, self.output_channel], 1)
+        if self.increase_dim is True:
+            pooled_input = tf.nn.avg_pool(input_layer, ksize=[1, 2, 2, 1],
+                                          strides=[1, 2, 2, 1], padding='VALID')
+            padded_input = tf.pad(pooled_input, [[0, 0], [0, 0], [0, 0], [self.input_channel // 2,
+                                                                          self.input_channel // 2]])
+        else:
+            padded_input = input_layer
+        output = conv2 + padded_input
+        self.output_shape = output.get_shape()
+        
+    def fprop(self,input_layer):
+        with tf.variable_scope('conv1_in_block_%s'%self.postfix,reuse=tf.AUTO_REUSE):
+            if self.first_block:
+                filter = tf.get_variable(name='conv1',shape=[3, 3, self.input_channel, self.output_channel])
+                conv1 = tf.nn.conv2d(input_layer, filter=filter, strides=[1, 1, 1, 1], padding='SAME')
+            else:
+                conv1 = bn_relu_conv_layer(input_layer, [3, 3, self.input_channel, self.output_channel], self.stride)                
+        with tf.variable_scope('conv2_in_block_%s'%self.postfix,reuse=tf.AUTO_REUSE):
+            conv2 = bn_relu_conv_layer(conv1, [3, 3, self.output_channel, self.output_channel], 1)
+        if self.increase_dim is True:
+            pooled_input = tf.nn.avg_pool(input_layer, ksize=[1, 2, 2, 1],
+                                          strides=[1, 2, 2, 1], padding='VALID')
+            padded_input = tf.pad(pooled_input, [[0, 0], [0, 0], [0, 0], [self.input_channel // 2,
+                                                                          self.input_channel // 2]])
+        else:
+            padded_input = input_layer
+        output = conv2 + padded_input        
+        return output
+                        
+        
 class Conv2D(Layer):
 
     def __init__(self, output_channels, kernel_shape, strides, padding,name=None):
         self.__dict__.update(locals())
         del self.self
         self.weight_name = name
-
+        self.kernel_shape = kernel_shape
     def set_input_shape(self, input_shape):
         batch_size, rows, cols, input_channels = input_shape
         kernel_shape = tuple(self.kernel_shape) + (input_channels,
@@ -207,10 +328,37 @@ class Conv2D(Layer):
         self.output_shape = tuple(output_shape)
 
     def fprop(self, x):
-        return tf.nn.conv2d(x, self.kernels, (1,) + tuple(self.strides) + (1,),
+        conv_layer =  tf.nn.conv2d(x, self.kernels, (1,) + tuple(self.strides) + (1,),
                             self.padding) + self.b
+        return conv_layer
 
 
+def batch_normalization_layer(input_layer, dimension,scope = None):
+    '''                                                                                                                               
+    Helper function to do batch normalziation                                                                                         
+    :param input_layer: 4D tensor                                                                                                     
+    :param dimension: input_layer.get_shape().as_list()[-1]. The depth of the 4D tensor                                               
+    :return: the 4D tensor after being normalized                                                                                     
+    '''
+    BN_EPSILON = 0.001
+    
+    mean, variance = tf.nn.moments(input_layer, axes=[0, 1, 2])
+    beta = None
+    gamma = None
+    if scope is None:
+        beta = tf.get_variable('beta', dimension, tf.float32,
+                               initializer=tf.constant_initializer(0.0, tf.float32))
+        gamma = tf.get_variable('gamma', dimension, tf.float32,
+                                initializer=tf.constant_initializer(1.0, tf.float32))
+    else:
+        with tf.variable_scope(scope):
+            beta = tf.get_variable('beta', dimension, tf.float32,
+                                   initializer=tf.constant_initializer(0.0, tf.float32))
+            gamma = tf.get_variable('gamma', dimension, tf.float32,
+                                    initializer=tf.constant_initializer(1.0, tf.float32))
+            
+    bn_layer = tf.nn.batch_normalization(input_layer, mean, variance, beta, gamma, BN_EPSILON)
+    return bn_layer                        
 class ReLU(Layer):
 
     def __init__(self,name=None):
@@ -227,7 +375,13 @@ class ReLU(Layer):
     def fprop(self, x):
         return tf.nn.relu(x)
 
-
+class Global_Pool(Layer):
+    def __init__(self,name = None):
+        pass
+    def set_input_shape(self,shape):
+        self.output_shape = (shape[0],shape[-1])
+    def fprop(self,x):
+        return tf.reduce_mean(x,[1,2])
 class Softmax(Layer):
 
     def __init__(self,name =None):
@@ -275,4 +429,69 @@ def make_basic_cnn(nb_filters=64, nb_classes=10,
               Softmax()]
 
     model = PruneableMLP(layers, input_shape,prune_percent=prune_percent)
+    return model
+def output_layer(input_layer, num_labels):
+        '''                                                                                                             
+    :param input_layer: 2D tensor                                                                                   
+    :param num_labels: int. How many output labels in total? (10 for cifar10 and 100 for cifar100)                  
+    :return: output layer Y = WX + B                                                                                
+    '''
+        input_dim = input_layer.get_shape().as_list()[-1]
+        fc_w = tf.get_variable(name='fc_weights', shape=[input_dim, num_labels])
+        
+        fc_b = tf.get_variable(name='fc_bias', shape=[num_labels], initializer=tf.zeros_initializer())
+        
+        fc_h = tf.matmul(input_layer, fc_w) + fc_b
+        return fc_h
+def make_resnet(x,n,input_shape,reuse,prune_percent):
+    layers = []
+    #with tf.variable_scope('conv0', reuse=reuse):
+
+        # replace conv0 as conv, bn, relu
+    with tf.variable_scope('initial',reuse = False):
+        layers.append(Conv2D(16,(3,3),(1,1),'SAME'))
+        layers.append(BN(16,16,scope='bn1'))
+        layers.append(ReLU())
+    reuse = None
+    for i in range(n):
+        if i >0:
+            reuse = True
+        else:
+            reuse = False
+        with tf.variable_scope('conv1_%d' %i, reuse=reuse):
+            if i == 0:
+                conv1 = residual_block(16,16, first_block=True,postfix='conv1_%d' %i)
+            else:
+                conv1 = residual_block(16,16,postfix='conv1_%d' %i)
+            layers.append(conv1)
+    out_channel = 0
+    for i in range(n):
+        with tf.variable_scope('conv2_%d' %i, reuse=False):
+            if i == 0:
+                out_channel = 16
+            else:
+                out_channel = 32
+            conv2 = residual_block(out_channel,32,postfix='conv2_%d' %i)
+            layers.append(conv2)
+    
+    for i in range(n):
+        with tf.variable_scope('conv3_%d' %i, reuse=False):
+            if i == 0:
+                out_channel = 32
+            else:
+                out_channel = 64
+            conv3 = residual_block(out_channel,64,postfix='conv3_%d' %i)
+            layers.append(conv3)
+            
+    with tf.variable_scope('fc', reuse=False):
+        in_channel = layers[-1].output_channel            
+
+        layers.append(BN(64,64,scope='bn2'))
+        layers.append(ReLU())
+        layers.append(Global_Pool())
+        layers.append(Linear(10,name='fc4'))
+        layers.append(Softmax())
+    print ("build the graph")
+    model = PruneableMLP(layers,input_shape,prune_percent=prune_percent)
+
     return model

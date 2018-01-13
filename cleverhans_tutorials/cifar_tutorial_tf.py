@@ -9,7 +9,7 @@ from __future__ import absolute_import
 from __future__ import division
 from __future__ import print_function
 from __future__ import unicode_literals
-
+from keras.utils import np_utils
 import numpy as np
 import tensorflow as tf
 from tensorflow.python.platform import flags
@@ -18,11 +18,11 @@ import logging
 from cleverhans.utils_mnist import data_mnist
 from keras.datasets import cifar10
 
-from cleverhans.utils_tf import model_train, model_eval,model_loss
+from cleverhans.utils_tf import model_train, model_eval,model_loss,initialize_uninitialized_global_variables
 from cleverhans.attacks import FastGradientMethod
 from cleverhans.attacks import SaliencyMapMethod
 from cleverhans.attacks import BasicIterativeMethod
-from cleverhans_tutorials.tutorial_models import make_basic_cnn
+from cleverhans_tutorials.tutorial_models import make_basic_cnn,make_resnet
 from cleverhans.utils import AccuracyReport, set_log_level
 
 import os
@@ -30,9 +30,11 @@ import os
 FLAGS = flags.FLAGS
 
 
+baseDir = os.path.dirname(os.path.abspath('__file__')) + '/'
+classesName = ['plane', 'car', 'bird', 'cat', 'deer', 'dog', 'frog', 'horse', '\
+ship', 'truck']
 
-
-def mnist_tutorial(train_start=0, train_end=60000, test_start=0,
+def cifar_tutorial(train_start=0, train_end=49000, test_start=0,
                    test_end=10000, nb_epochs=6, batch_size=128,
                    learning_rate=0.001,
                    clean_train=True,
@@ -75,30 +77,25 @@ def mnist_tutorial(train_start=0, train_end=60000, test_start=0,
         config_args = {}
     sess = tf.Session(config=tf.ConfigProto(**config_args))
 
-    # Get MNIST test data
-    X_train, Y_train, X_test, Y_test = data_mnist(train_start=train_start,
-                                                  train_end=train_end,
-                                                  test_start=test_start,
-                                                  test_end=test_end)
 
-    # Use label smoothing
-    assert Y_train.shape[1] == 10
-    label_smooth = .1
-    Y_train = Y_train.clip(label_smooth / 9., 1. - label_smooth)
-
+    (X_train, Y_train), (X_test, Y_test) = cifar10.load_data()
+    Y_train = np_utils.to_categorical(Y_train, 10)
+    Y_test =  np_utils.to_categorical(Y_test, 10)
+    print (Y_test.shape)
+    print (Y_train.shape)
+    print (Y_test[0])
     # Define input TF placeholder
+    
+    x = tf.placeholder(tf.float32, shape=(None, 32, 32, 3))
+    x0 = tf.placeholder(tf.float32, shape=(None, 32, 32, 3))
+    y = tf.placeholder(tf.float32, shape=([None,10]))
 
-    x = tf.placeholder(tf.float32, shape=(None, 28, 28, 1))
-    y = tf.placeholder(tf.float32, shape=(None, 10))
-
-    model_path = "models/mnist"
-    # Train an MNIST model
+    eps = 0.9
     train_params = {
         'nb_epochs': 10,
         'batch_size': batch_size,
         'learning_rate': learning_rate
     }
-    eps = 0.9
     fgsm_params = {'eps': eps,
                    'clip_min': 0.,
                    'clip_max': 1.}
@@ -106,10 +103,11 @@ def mnist_tutorial(train_start=0, train_end=60000, test_start=0,
     prune_factor = 10
     conv_prune_factor = 5
     if clean_train:
-        prune_percent = {'conv1_w':3,'conv2_w':3,'conv3_w':3,'fc1_w':10,'fc2_w':10,'fc3_w':10}
-        model = make_basic_cnn(nb_filters=nb_filters,prune_percent=prune_percent)
+        prune_percent = {'fc1_w':10,'fc2_w':10,'fc3_w':10}
+        model = make_resnet(x,10,[None,32,32,3],reuse = True,prune_percent = prune_percent)
         preds = model.get_probs(x)
-
+        initialize_uninitialized_global_variables(sess)
+        
         def evaluate():
             # Evaluate the accuracy of the MNIST model on legitimate test
             # examples
@@ -123,12 +121,6 @@ def mnist_tutorial(train_start=0, train_end=60000, test_start=0,
         model_train(sess, x, y, preds, X_train, Y_train, evaluate=evaluate,
                     args=train_params, rng=rng)
         
-        # Calculate training error
-        if testing:
-            eval_params = {'batch_size': batch_size}
-            acc = model_eval(
-                sess, x, y, preds, X_train, Y_train, args=eval_params)
-            report.train_clean_train_clean_eval = acc
 
         # Initialize the Fast Gradient Sign Method (FGSM) attack object and
         # graph
@@ -153,6 +145,7 @@ def mnist_tutorial(train_start=0, train_end=60000, test_start=0,
         learning_rate = 5e-4
         inhibition_eps = 10
         print ("learning rate %f iteration %d prune factor %d AE eps %f inhibition eps %f" %(learning_rate,iterations,prune_factor,eps,inhibition_eps))
+        '''
         for i in range(iterations):
 
             print ("iterative %d"  % (i))
@@ -186,11 +179,12 @@ def mnist_tutorial(train_start=0, train_end=60000, test_start=0,
         assert X_test.shape[0] == test_end - test_start, X_test.shape
         print('Test accuracy on legitimate examples: %0.4f' % acc)
         '''
+        '''
         fgsm = FastGradientMethod(model, sess=sess)
         adv_x = fgsm.generate(x, **fgsm_params)
         preds_adv = model.get_probs(adv_x)
         '''
-
+    '''
         bim = BasicIterativeMethod(model,sess = sess)
         adv_x = bim.generate(x)
         preds_adv = model.get_probs(adv_x)
@@ -198,56 +192,10 @@ def mnist_tutorial(train_start=0, train_end=60000, test_start=0,
         acc = model_eval(sess, x, y, preds_adv, X_test, Y_test, args=eval_par)
         print('Test accuracy on adversarial examples after model prunning: %0.4f\n' % acc)
     print("Repeating the process, using adversarial training")            
-    # Redefine TF model graph
-    '''
-    model_2 = make_basic_cnn(nb_filters=nb_filters)
-    preds_2 = model_2(x)
-    fgsm2 = FastGradientMethod(model_2, sess=sess)
-    adv_x_2 = fgsm2.generate(x, **fgsm_params)
-    if not backprop_through_attack:
-        # For the fgsm attack used in this tutorial, the attack has zero
-        # gradient so enabling this flag does not change the gradient.
-        # For some other attacks, enabling this flag increases the cost of
-        # training, but gives the defender the ability to anticipate how
-        # the atacker will change their strategy in response to updates to
-        # the defender's parameters.
-        adv_x_2 = tf.stop_gradient(adv_x_2)
-    preds_2_adv = model_2(adv_x_2)
-
-    def evaluate_2():
-        # Accuracy of adversarially trained model on legitimate test inputs
-        eval_params = {'batch_size': batch_size}
-        accuracy = model_eval(sess, x, y, preds_2, X_test, Y_test,
-                              args=eval_params)
-        print('Test accuracy on legitimate examples: %0.4f' % accuracy)
-        report.adv_train_clean_eval = accuracy
-
-        # Accuracy of the adversarially trained model on adversarial examples
-        accuracy = model_eval(sess, x, y, preds_2_adv, X_test,
-                              Y_test, args=eval_params)
-        print('Test accuracy on adversarial examples: %0.4f' % accuracy)
-        report.adv_train_adv_eval = accuracy
-
-    # Perform and evaluate adversarial training
-    model_train(sess, x, y, preds_2, X_train, Y_train,
-                predictions_adv=preds_2_adv, evaluate=evaluate_2,
-                args=train_params, rng=rng)
-
-    # Calculate training errors
-    if testing:
-        eval_params = {'batch_size': batch_size}
-        accuracy = model_eval(sess, x, y, preds_2, X_train, Y_train,
-                              args=eval_params)
-        report.train_adv_train_clean_eval = accuracy
-        accuracy = model_eval(sess, x, y, preds_2_adv, X_train,
-                              Y_train, args=eval_params)
-        report.train_adv_train_adv_eval = accuracy
-
-    return report
     '''
 
 def main(argv=None):
-    mnist_tutorial(nb_epochs=FLAGS.nb_epochs, batch_size=FLAGS.batch_size,
+    cifar_tutorial(nb_epochs=FLAGS.nb_epochs, batch_size=FLAGS.batch_size,
                    learning_rate=FLAGS.learning_rate,
                    clean_train=FLAGS.clean_train,
                    backprop_through_attack=FLAGS.backprop_through_attack,
@@ -257,7 +205,7 @@ def main(argv=None):
 if __name__ == '__main__':
     flags.DEFINE_integer('nb_filters', 64, 'Model size multiplier')
     flags.DEFINE_integer('nb_epochs', 6, 'Number of epochs to train model')
-    flags.DEFINE_integer('batch_size', 1024, 'Size of training batches')
+    flags.DEFINE_integer('batch_size', 128, 'Size of training batches')
     flags.DEFINE_float('learning_rate', 0.001, 'Learning rate for training')
     flags.DEFINE_bool('clean_train', True, 'Train on clean examples')
     flags.DEFINE_bool('backprop_through_attack', False,
