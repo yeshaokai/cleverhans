@@ -10,7 +10,7 @@ from __future__ import unicode_literals
 import numpy as np
 import tensorflow as tf
 from cleverhans.model import Model
-
+from cleverhans.utils_tf import initialize_uninitialized_global_variables
 
 class MLP(Model):
     """
@@ -29,15 +29,14 @@ class MLP(Model):
         else:
             layers[-1].name = 'logits'
         for i, layer in enumerate(self.layers):
-            with tf.variable_scope('xixi%d' %(i),reuse = False):
-                if hasattr(layer, 'name'):
-                    name = layer.name
-                else:
-                    name = layer.__class__.__name__ + str(i)
-                self.layer_names.append(name)
+            if hasattr(layer, 'name'):
+                name = layer.name
+            else:
+                name = layer.__class__.__name__ + str(i)
+            self.layer_names.append(name)
 
-                layer.set_input_shape(input_shape)
-                input_shape = layer.get_output_shape()
+            layer.set_input_shape(input_shape)
+            input_shape = layer.get_output_shape()
 
     def fprop(self, x, set_ref=False):
         states = []
@@ -53,7 +52,10 @@ class PruneableMLP(MLP):
     def __init__(self, layers, input_shape,prune_percent=None):
         super(PruneableMLP, self).__init__(layers, input_shape)
         self.prune_percent = prune_percent
-        
+    def test_mode(self):
+        for layer in self.layers:
+            if isinstance(layer,BN):
+                layer.test_mode()
     def update(self):
         # update computational graph after pruning
         pass
@@ -124,7 +126,7 @@ class PruneableMLP(MLP):
                 temp = np.zeros(weight_arr.shape)
                 temp[weight_arr>0] = 1
                 temp[weight_arr<0] = -1
-                weight_arr += temp*0.1
+                weight_arr += weight_arr*20
                 if isinstance(layer,Conv2D):
                     sess.run(layer.kernels.assign(weight_arr))
                 elif isinstance(layer,Linear):
@@ -180,32 +182,22 @@ class Linear(Layer):
 
     def fprop(self, x):
         return tf.matmul(x, self.W) + self.b
-class BN(Layer):
-    def __init__(self,in_channel,out_channel,scope = None):
-        self.in_channel = in_channel
-        self.out_channel = out_channel
-        self.output_shape = None
-        self.scope = scope
-    def set_input_shape(self,input_shape):
-        self.input_shape = input_shape
-        lst = list(self.input_shape)
-        lst[-1] = self.out_channel
-        self.output_shape = tuple(lst)
-    def fprop(self,input_layer):
-        BN_EPSILON = 0.001
-        dimension = self.out_channel
-        mean, variance = tf.nn.moments(input_layer, axes=[0, 1, 2])
-        beta = None
-        gamma = None
-        with tf.variable_scope('fpropBN_%s'%self.scope,reuse = tf.AUTO_REUSE):
-            beta = tf.get_variable('beta', dimension, tf.float32,
-                               initializer=tf.constant_initializer(0.0, tf.float32))
-            gamma = tf.get_variable('gamma', dimension, tf.float32,
-                                initializer=tf.constant_initializer(1.0, tf.float32))
 
-        bn_layer = tf.nn.batch_normalization(input_layer, mean, variance, beta, gamma, BN_EPSILON)
-        return bn_layer                        
-        #return batch_normalization_layer(x,self.out_channel,scope = self.scope)
+class BN(Layer):
+    def __init__(self,name = None):
+        self.weight_name = name
+        self.batch = None
+        self.is_training = True
+    def set_input_shape(self,input_shape):
+        self.input_shape = input_shape        
+        self.output_shape = input_shape
+    def test_mode(self):
+        self.is_training = False
+    def train_mode(self):
+        self.is_training = True
+    def fprop(self,input_layer):
+        with tf.variable_scope('%s'%self.weight_name,reuse = False):
+            return tf.contrib.layers.batch_norm(input_layer, is_training = self.is_training)
         
 def bn_relu_conv_layer(input_layer, filter_shape, stride):
     '''                                                                                                                               
@@ -243,7 +235,7 @@ def conv_bn_relu_layer(input_layer, filter_shape, stride):
     output = tf.nn.relu(bn_layer)
     return output
 class residual_block(Layer):
-    def __init__(self,input_channel,output_channel,first_block=False,postfix='yo'):
+    def __init__(self,input_channel,output_channel,first_block=False,postfix='yo',name = None):
         self.postfix = postfix
         self.output_channel = output_channel
         self.first_block = first_block
@@ -251,6 +243,7 @@ class residual_block(Layer):
         self.kernel_shape = (3,3)
         self.increase_dim = None
         self.tride = None
+        self.weight_name = name
     def set_input_shape(self,input_shape):
         input_layer = tf.zeros(input_shape)
         if self.input_channel*2 == self.output_channel:
@@ -340,25 +333,8 @@ def batch_normalization_layer(input_layer, dimension,scope = None):
     :param dimension: input_layer.get_shape().as_list()[-1]. The depth of the 4D tensor                                               
     :return: the 4D tensor after being normalized                                                                                     
     '''
-    BN_EPSILON = 0.001
-    
-    mean, variance = tf.nn.moments(input_layer, axes=[0, 1, 2])
-    beta = None
-    gamma = None
-    if scope is None:
-        beta = tf.get_variable('beta', dimension, tf.float32,
-                               initializer=tf.constant_initializer(0.0, tf.float32))
-        gamma = tf.get_variable('gamma', dimension, tf.float32,
-                                initializer=tf.constant_initializer(1.0, tf.float32))
-    else:
-        with tf.variable_scope(scope):
-            beta = tf.get_variable('beta', dimension, tf.float32,
-                                   initializer=tf.constant_initializer(0.0, tf.float32))
-            gamma = tf.get_variable('gamma', dimension, tf.float32,
-                                    initializer=tf.constant_initializer(1.0, tf.float32))
-            
-    bn_layer = tf.nn.batch_normalization(input_layer, mean, variance, beta, gamma, BN_EPSILON)
-    return bn_layer                        
+    return tf.contrib.layers.batch_norm(input_layer)
+
 class ReLU(Layer):
 
     def __init__(self,name=None):
@@ -377,11 +353,13 @@ class ReLU(Layer):
 
 class Global_Pool(Layer):
     def __init__(self,name = None):
-        pass
+        self.weight_name = name
     def set_input_shape(self,shape):
         self.output_shape = (shape[0],shape[-1])
     def fprop(self,x):
         return tf.reduce_mean(x,[1,2])
+class Max_Pool(Layer):
+    pass
 class Softmax(Layer):
 
     def __init__(self,name =None):
@@ -430,25 +408,31 @@ def make_basic_cnn(nb_filters=64, nb_classes=10,
 
     model = PruneableMLP(layers, input_shape,prune_percent=prune_percent)
     return model
-def output_layer(input_layer, num_labels):
-        '''                                                                                                             
-    :param input_layer: 2D tensor                                                                                   
-    :param num_labels: int. How many output labels in total? (10 for cifar10 and 100 for cifar100)                  
-    :return: output layer Y = WX + B                                                                                
-    '''
-        input_dim = input_layer.get_shape().as_list()[-1]
-        fc_w = tf.get_variable(name='fc_weights', shape=[input_dim, num_labels])
-        
-        fc_b = tf.get_variable(name='fc_bias', shape=[num_labels], initializer=tf.zeros_initializer())
-        
-        fc_h = tf.matmul(input_layer, fc_w) + fc_b
-        return fc_h
+def make_strong_cnn(nb_filters=64, nb_classes=10,
+                   input_shape=(None, 32, 32, 3),prune_percent=None):
+    layers = [Conv2D(nb_filters, (8, 8), (2, 2), "SAME",name='conv1_w'),
+              BN(name='bn1'),
+              ReLU(),
+              Conv2D(nb_filters*2, (6, 6), (2, 2), "VALID",name='conv2_w'),
+              BN(name='bn2'),
+              ReLU(),
+              Conv2D(nb_filters * 2, (5, 5), (1, 1), "VALID",name='conv3_w'),
+              BN(name='bn3'),
+              ReLU(),
+              Flatten(),
+              Linear(1280,name='fc1_w'),
+              Linear(1280,name='fc2_w'),
+              Linear(nb_classes,name='fc3_w'),
+              Softmax()]
+
+    model = PruneableMLP(layers, input_shape,prune_percent=prune_percent)
+    return model
 def make_resnet(x,n,input_shape,reuse,prune_percent):
     layers = []
     #with tf.variable_scope('conv0', reuse=reuse):
 
         # replace conv0 as conv, bn, relu
-    with tf.variable_scope('initial',reuse = False):
+    with tf.variable_scope('initial',reuse = tf.AUTO_REUSE):
         layers.append(Conv2D(16,(3,3),(1,1),'SAME'))
         layers.append(BN(16,16,scope='bn1'))
         layers.append(ReLU())
@@ -458,7 +442,7 @@ def make_resnet(x,n,input_shape,reuse,prune_percent):
             reuse = True
         else:
             reuse = False
-        with tf.variable_scope('conv1_%d' %i, reuse=reuse):
+        with tf.variable_scope('conv1_%d' %i, reuse=tf.AUTO_REUSE):
             if i == 0:
                 conv1 = residual_block(16,16, first_block=True,postfix='conv1_%d' %i)
             else:
@@ -466,7 +450,7 @@ def make_resnet(x,n,input_shape,reuse,prune_percent):
             layers.append(conv1)
     out_channel = 0
     for i in range(n):
-        with tf.variable_scope('conv2_%d' %i, reuse=False):
+        with tf.variable_scope('conv2_%d' %i, reuse=tf.AUTO_REUSE):
             if i == 0:
                 out_channel = 16
             else:
@@ -475,7 +459,7 @@ def make_resnet(x,n,input_shape,reuse,prune_percent):
             layers.append(conv2)
     
     for i in range(n):
-        with tf.variable_scope('conv3_%d' %i, reuse=False):
+        with tf.variable_scope('conv3_%d' %i, reuse=tf.AUTO_REUSE):
             if i == 0:
                 out_channel = 32
             else:
@@ -483,15 +467,15 @@ def make_resnet(x,n,input_shape,reuse,prune_percent):
             conv3 = residual_block(out_channel,64,postfix='conv3_%d' %i)
             layers.append(conv3)
             
-    with tf.variable_scope('fc', reuse=False):
+    with tf.variable_scope('fc', reuse=tf.AUTO_REUSE):
         in_channel = layers[-1].output_channel            
 
         layers.append(BN(64,64,scope='bn2'))
         layers.append(ReLU())
         layers.append(Global_Pool())
-        layers.append(Linear(10,name='fc4'))
+        layers.append(Linear(10,name='fc1_w'))
         layers.append(Softmax())
-    print ("build the graph")
-    model = PruneableMLP(layers,input_shape,prune_percent=prune_percent)
+        print ("build the graph")
+        model = PruneableMLP(layers,input_shape,prune_percent=prune_percent)
 
     return model

@@ -69,7 +69,7 @@ def initialize_uninitialized_global_variables(sess):
 
 def model_train(sess, x, y, predictions, X_train, Y_train, save=False,
                 predictions_adv=None, init_all=True, evaluate=None,
-                verbose=True, feed=None, args=None, rng=None,prune_args=None):
+                verbose=True, feed=None, args=None, rng=None,prune_args=None,retrainindex = None):
     """
     Train a TF graph
     :param sess: TF session to use when training the graph
@@ -128,16 +128,14 @@ def model_train(sess, x, y, predictions, X_train, Y_train, save=False,
     if not prune_args:
         train_step = tf.train.AdamOptimizer(learning_rate=args.learning_rate)
         train_step = train_step.minimize(loss)
-    else:
-        '''
-        trainer = tf.train.AdamOptimizer(learning_rate = args.learning_rate)
-        grads = trainer.compute_gradients(loss)
-        grads = model.a
-        '''
+
+    else:        
         trainer = prune_args['trainer']
         grads = prune_args['grads']
-
-        train_step = trainer.apply_gradients(grads)
+        
+        with tf.variable_scope('retrain%d'%retrainindex,reuse = False):
+            train_step = trainer.apply_gradients(grads)
+        
     with sess.as_default():
         '''
         if hasattr(tf, "global_variables_initializer"):
@@ -152,11 +150,7 @@ def model_train(sess, x, y, predictions, X_train, Y_train, save=False,
         '''
         import time
         start = time.time()
-        '''
-        for var in tf.global_variables():
-                if tf.is_variable_initialized(var).eval() == False:
-                    sess.run(tf.variables_initializer([var]))
-        '''
+
         initialize_uninitialized_global_variables(sess)
         end = time.time()
         print ('initialization takes %f' %(end - start))
