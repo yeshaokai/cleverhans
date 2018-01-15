@@ -217,7 +217,7 @@ def main(argv=None):
 
 if __name__ == '__main__':
     flags.DEFINE_integer('nb_filters', 64, 'Model size multiplier')
-    flags.DEFINE_integer('nb_epochs', 2, 'Number of epochs to train model')
+    flags.DEFINE_integer('nb_epochs', 100, 'Number of epochs to train model')
     flags.DEFINE_integer('batch_size', 512, 'Size of training batches')
     flags.DEFINE_float('learning_rate', 0.001, 'Learning rate for training')
     flags.DEFINE_bool('clean_train', True, 'Train on clean examples')

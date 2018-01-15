@@ -196,7 +196,7 @@ class BN(Layer):
     def train_mode(self):
         self.is_training = True
     def fprop(self,input_layer):
-        with tf.variable_scope('%s'%self.weight_name,reuse = False):
+        with tf.variable_scope('%s'%self.weight_name,reuse = tf.AUTO_REUSE):
             return tf.contrib.layers.batch_norm(input_layer, is_training = self.is_training)
         
 def bn_relu_conv_layer(input_layer, filter_shape, stride):
