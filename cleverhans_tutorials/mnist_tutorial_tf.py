@@ -93,19 +93,19 @@ def mnist_tutorial(train_start=0, train_end=60000, test_start=0,
     model_path = "models/mnist"
     # Train an MNIST model
     train_params = {
-        'nb_epochs': 10,
+        'nb_epochs': FLAGS.nb_epochs,
         'batch_size': batch_size,
         'learning_rate': learning_rate
     }
-    eps = 0.9
-    fgsm_params = {'eps': eps,
+
+    fgsm_params = {'eps': FLAGS.fgsm_eps,
                    'clip_min': 0.,
                    'clip_max': 1.}
     rng = np.random.RandomState([2017, 8, 30])
-    prune_factor = 10
-    conv_prune_factor = 5
+    prune_factor = FLAGS.prune_factor
+
     if clean_train:
-        prune_percent = {'fc1_w':10,'fc2_w':10,'fc3_w':10}
+        prune_percent = {'conv1_w':5,'conv2_w':5,'conv3_w':5,'fc1_w':prune_factor,'fc2_w':prune_factor,'fc3_w':prune_factor}
         model = make_basic_cnn(nb_filters=nb_filters,prune_percent=prune_percent)
         
         preds = model.get_probs(x)
@@ -149,15 +149,12 @@ def mnist_tutorial(train_start=0, train_end=60000, test_start=0,
                              Y_train, args=eval_par)
             report.train_clean_train_adv_eval = acc
         print ("start iterative pruning")
-        iterations = 20
-        learning_rate = 5e-4
-        inhibition_eps = 10
-        print ("learning rate %f iteration %d prune factor %d AE eps %f inhibition eps %f" %(learning_rate,iterations,prune_factor,eps,inhibition_eps))
+
         
         preds = model.get_probs(x)
         loss = model_loss(y,preds)
 
-        for i in range(iterations):
+        for i in range(FLAGS.prune_iterations):
             print ("iterative %d"  % (i))
             start = time.time()
             dict_nzidx = model.apply_prune(sess)
@@ -168,20 +165,20 @@ def mnist_tutorial(train_start=0, train_end=60000, test_start=0,
             print ('until grad compute elpased %f' % (end-start))
             prune_args = {'trainer':trainer,'grads':grads}
             train_params = {
-                'nb_epochs':2,
+                'nb_epochs':FLAGS.retrain_epoch,
                 'batch_size': batch_size,
-                'learning_rate': 1e-3
+                'learning_rate': FLAGS.retrain_lr
                 }
             start = time.time()
             model_train(sess, x, y, preds, X_train, Y_train, evaluate=evaluate,
-                    args=train_params, rng=rng,prune_args=prune_args)
+                        args=train_params, rng=rng,prune_args=prune_args,retrainindex = i)
             end = time.time()
             print ('model_train function takes %f' % (end-start))
             eval_par = {'batch_size': batch_size}
             acc = model_eval(sess, x, y, preds_adv, X_test, Y_test, args=eval_par)
             print('Test accuracy on adversarial examples: %0.4f\n' % acc)
 
-        model.inhibition(sess,inhibition_eps)
+        model.inhibition(sess,original_method = FLAGS.use_inhibition_original,inhibition_eps = FLAGS.inhibition_eps)
         eval_par = {'batch_size': batch_size}
         acc = model_eval(sess, x, y, preds_adv, X_test, Y_test, args=eval_par)
         print('Test accuracy on adversarial examples: %0.4f\n' % acc)
@@ -202,55 +199,8 @@ def mnist_tutorial(train_start=0, train_end=60000, test_start=0,
         preds_adv = model.get_probs(adv_x)
         eval_par = {'batch_size': batch_size}
         acc = model_eval(sess, x, y, preds_adv, X_test, Y_test, args=eval_par)
-        print('Test accuracy on adversarial examples after model prunning: %0.4f\n' % acc)
-    print("Repeating the process, using adversarial training")            
-    # Redefine TF model graph
-    '''
-    model_2 = make_basic_cnn(nb_filters=nb_filters)
-    preds_2 = model_2(x)
-    fgsm2 = FastGradientMethod(model_2, sess=sess)
-    adv_x_2 = fgsm2.generate(x, **fgsm_params)
-    if not backprop_through_attack:
-        # For the fgsm attack used in this tutorial, the attack has zero
-        # gradient so enabling this flag does not change the gradient.
-        # For some other attacks, enabling this flag increases the cost of
-        # training, but gives the defender the ability to anticipate how
-        # the atacker will change their strategy in response to updates to
-        # the defender's parameters.
-        adv_x_2 = tf.stop_gradient(adv_x_2)
-    preds_2_adv = model_2(adv_x_2)
+        print('Test accuracy on adversarial examples generated IterativeMethod: %0.4f\n' % acc)
 
-    def evaluate_2():
-        # Accuracy of adversarially trained model on legitimate test inputs
-        eval_params = {'batch_size': batch_size}
-        accuracy = model_eval(sess, x, y, preds_2, X_test, Y_test,
-                              args=eval_params)
-        print('Test accuracy on legitimate examples: %0.4f' % accuracy)
-        report.adv_train_clean_eval = accuracy
-
-        # Accuracy of the adversarially trained model on adversarial examples
-        accuracy = model_eval(sess, x, y, preds_2_adv, X_test,
-                              Y_test, args=eval_params)
-        print('Test accuracy on adversarial examples: %0.4f' % accuracy)
-        report.adv_train_adv_eval = accuracy
-
-    # Perform and evaluate adversarial training
-    model_train(sess, x, y, preds_2, X_train, Y_train,
-                predictions_adv=preds_2_adv, evaluate=evaluate_2,
-                args=train_params, rng=rng)
-
-    # Calculate training errors
-    if testing:
-        eval_params = {'batch_size': batch_size}
-        accuracy = model_eval(sess, x, y, preds_2, X_train, Y_train,
-                              args=eval_params)
-        report.train_adv_train_clean_eval = accuracy
-        accuracy = model_eval(sess, x, y, preds_2_adv, X_train,
-                              Y_train, args=eval_params)
-        report.train_adv_train_adv_eval = accuracy
-
-    return report
-    '''
 
 def main(argv=None):
     mnist_tutorial(nb_epochs=FLAGS.nb_epochs, batch_size=FLAGS.batch_size,
@@ -262,12 +212,18 @@ def main(argv=None):
 
 if __name__ == '__main__':
     flags.DEFINE_integer('nb_filters', 64, 'Model size multiplier')
-    flags.DEFINE_integer('nb_epochs', 6, 'Number of epochs to train model')
+    flags.DEFINE_integer('nb_epochs', 10, 'Number of epochs to train model')
     flags.DEFINE_integer('batch_size', 1024, 'Size of training batches')
     flags.DEFINE_float('learning_rate', 0.001, 'Learning rate for training')
     flags.DEFINE_bool('clean_train', True, 'Train on clean examples')
     flags.DEFINE_bool('backprop_through_attack', False,
                       ('If True, backprop through adversarial example '
                        'construction process during adversarial training'))
-
+    flags.DEFINE_integer('retrain_epoch',2,'Number of retrain before next pruning')
+    flags.DEFINE_float('fgsm_eps',0.3,'eps for fgsm')
+    flags.DEFINE_bool('use_inhibition_original',True,'true if you want to use original inhibition method. False if you want to use my modified version')
+    flags.DEFINE_integer('prune_iterations',30,'number of iteration for iterative pruning.')
+    flags.DEFINE_float('retrain_lr',1e-3,'lr for retraining')
+    flags.DEFINE_float('prune_factor',10,'how much percentage off. 10 as take 10 percent off')
+    flags.DEFINE_float('inhibition_eps',0.1,'recommend 0.1 for original, 20 for modified')
     tf.app.run()

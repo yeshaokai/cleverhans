@@ -170,7 +170,7 @@ def cifar_tutorial(train_start=0, train_end=49000, test_start=0,
             grads = model.apply_prune_on_grads(grads,dict_nzidx)
             prune_args = {'trainer':trainer,'grads':grads}
             train_params = {
-                'nb_epochs':1,
+                'nb_epochs':3,
                 'batch_size': batch_size,
                 'learning_rate': 1e-3
                 }

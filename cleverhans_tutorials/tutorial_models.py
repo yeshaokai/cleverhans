@@ -112,7 +112,7 @@ class PruneableMLP(MLP):
                     grads_and_vars[count] = (tf.multiply(nzidx_obj, grad), var)
                 count += 1
         return grads_and_vars
-    def inhibition(self,sess,eps=0.1):
+    def inhibition(self,sess,original_method = True, inhibition_eps = 0.1):
         for layer in self.layers:
             if layer.weight_name in self.prune_percent:
                 print ("at %s do inhibition"% (layer.weight_name))
@@ -126,7 +126,10 @@ class PruneableMLP(MLP):
                 temp = np.zeros(weight_arr.shape)
                 temp[weight_arr>0] = 1
                 temp[weight_arr<0] = -1
-                weight_arr += weight_arr*20
+                if original_method:
+                    weight_arr += inhibition_eps*temp
+                else:
+                    weight_arr += weight_arr*inhibition_eps
                 if isinstance(layer,Conv2D):
                     sess.run(layer.kernels.assign(weight_arr))
                 elif isinstance(layer,Linear):
@@ -163,21 +166,28 @@ class Layer(object):
         return self.output_shape
 
 
-class Linear(Layer):
 
-    def __init__(self, num_hid,name):
+class Linear(Layer):
+    '''
+    wd:  weight decay
+
+    '''
+    def __init__(self, num_hid,name,wd=0.01):
         self.num_hid = num_hid
         self.weight_name = name
+        self.wd = wd
     def set_input_shape(self, input_shape):
-        print ("what")
-        print (input_shape)
+
+
         batch_size, dim = input_shape
         self.input_shape = [batch_size, dim]
         self.output_shape = [batch_size, self.num_hid]
         init = tf.random_normal([dim, self.num_hid], dtype=tf.float32)
         init = init / tf.sqrt(1e-7 + tf.reduce_sum(tf.square(init), axis=0,
                                                    keep_dims=True))
-        self.W = tf.Variable(init,name = self.weight_name)
+        #self.W = tf.Variable(init,name = self.weight_name)
+        regularizer = tf.contrib.layers.l2_regularizer(self.wd)
+        self.W = tf.get_variable(self.weight_name,shape=[dim,self.num_hid],regularizer = regularizer)
         self.b = tf.Variable(np.zeros((self.num_hid,)).astype('float32'))
 
     def fprop(self, x):
@@ -359,12 +369,16 @@ class Global_Pool(Layer):
     def fprop(self,x):
         return tf.reduce_mean(x,[1,2])
 class Max_Pool(Layer):
-    pass
+    def __init__(self,ksize,strides,padding,name=None):
+        self.weight_name = name
+    def set_input_shape(self,shape):
+        pass
+    def fprop(self,x):
+        pass
 class Softmax(Layer):
 
     def __init__(self,name =None):
         self.weight_name = name
-        pass
 
     def set_input_shape(self, shape):
         self.input_shape = shape
@@ -411,17 +425,21 @@ def make_basic_cnn(nb_filters=64, nb_classes=10,
 def make_strong_cnn(nb_filters=64, nb_classes=10,
                    input_shape=(None, 32, 32, 3),prune_percent=None):
     layers = [Conv2D(nb_filters, (8, 8), (2, 2), "SAME",name='conv1_w'),
-              BN(name='bn1'),
+#              BN(name='bn1'),
               ReLU(),
               Conv2D(nb_filters*2, (6, 6), (2, 2), "VALID",name='conv2_w'),
-              BN(name='bn2'),
+ #             BN(name='bn2'),
               ReLU(),
               Conv2D(nb_filters * 2, (5, 5), (1, 1), "VALID",name='conv3_w'),
-              BN(name='bn3'),
+  #            BN(name='bn3'),
               ReLU(),
               Flatten(),
               Linear(1280,name='fc1_w'),
+   #           BN(name='bn4'),
+              ReLU(),
               Linear(1280,name='fc2_w'),
+    #          BN(name='bn5'),
+              ReLU(),
               Linear(nb_classes,name='fc3_w'),
               Softmax()]
 
