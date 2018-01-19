@@ -368,13 +368,21 @@ class Global_Pool(Layer):
         self.output_shape = (shape[0],shape[-1])
     def fprop(self,x):
         return tf.reduce_mean(x,[1,2])
-class Max_Pool(Layer):
-    def __init__(self,ksize,strides,padding,name=None):
+class MaxPool(Layer):
+    def __init__(self,strides=2,padding='VALID',name=None):
         self.weight_name = name
+        self.strides = strides
+        self.padding = padding
+
     def set_input_shape(self,shape):
-        pass
+        self.input_shape = shape
+        dummy_batch = tf.zeros(shape)
+        dummy_output = self.fprop(dummy_batch)
+        output_shape = [int(e) for e in dummy_output.get_shape()]
+        output_shape[0] = 1
+        self.output_shape = tuple(output_shape)
     def fprop(self,x):
-        pass
+        return tf.layers.max_pooling2d(x,pool_size=[2,2],strides=self.strides,padding=self.padding)
 class Softmax(Layer):
 
     def __init__(self,name =None):
@@ -424,21 +432,20 @@ def make_basic_cnn(nb_filters=64, nb_classes=10,
     return model
 def make_strong_cnn(nb_filters=64, nb_classes=10,
                    input_shape=(None, 32, 32, 3),prune_percent=None):
-    layers = [Conv2D(nb_filters, (8, 8), (2, 2), "SAME",name='conv1_w'),
-#              BN(name='bn1'),
+    layers = [Conv2D(nb_filters, (3, 3), (1, 1), "SAME",name='conv1_w'),
               ReLU(),
-              Conv2D(nb_filters*2, (6, 6), (2, 2), "VALID",name='conv2_w'),
- #             BN(name='bn2'),
+              Conv2D(nb_filters, (3, 3), (1, 1), "SAME",name='conv2_w'),
               ReLU(),
-              Conv2D(nb_filters * 2, (5, 5), (1, 1), "VALID",name='conv3_w'),
-  #            BN(name='bn3'),
+              MaxPool(),
+              Conv2D(nb_filters * 2, (3, 3), (1, 1), "SAME",name='conv3_w'),
               ReLU(),
+              Conv2D(nb_filters * 2, (3, 3), (1, 1), "SAME",name='conv3_w'),
+              ReLU(),
+              MaxPool(),
               Flatten(),
-              Linear(1280,name='fc1_w'),
-   #           BN(name='bn4'),
+              Linear(256,name='fc1_w'),
               ReLU(),
-              Linear(1280,name='fc2_w'),
-    #          BN(name='bn5'),
+              Linear(256,name='fc2_w'),
               ReLU(),
               Linear(nb_classes,name='fc3_w'),
               Softmax()]
