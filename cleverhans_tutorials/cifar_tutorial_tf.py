@@ -93,26 +93,26 @@ def cifar_tutorial(train_start=0, train_end=49000, test_start=0,
 
     y = tf.placeholder(tf.float32, shape=([None,10]))
 
-    eps = 0.3
+
     train_params = {
         'nb_epochs': nb_epochs,
         'batch_size': batch_size,
         'learning_rate': learning_rate
     }
-    fgsm_params = {'eps': eps,
+    fgsm_params = {'eps': FLAGS.fgsm_eps,
                    'clip_min': 0.,
                    'clip_max': 1.}
     rng = np.random.RandomState([2017, 8, 30])
-    prune_factor = 10
+    prune_factor = FLAGS.prune_factor
     conv_prune_factor = 5
     if clean_train:
-        prune_percent = {'fc1_w':10,'fc2_w':10,'fc3_w':10}
+        prune_percent = {'conv1_w':5,'conv2_w':5,'conv3_w':5,'conv4_w':5,'fc1_w':10,'fc2_w':10,'fc3_w':10}
         #model = make_resnet(x,10,[None,32,32,3],reuse = True,prune_percent = prune_percent)
         model = make_strong_cnn(nb_filters=nb_filters,prune_percent=prune_percent)
         initialize_uninitialized_global_variables(sess)
         preds = model.get_probs(x)
         saver = tf.train.Saver()
-        
+        eval_par = {'batch_size': batch_size}        
         def evaluate():
             # Evaluate the accuracy of the MNIST model on legitimate test
             # examples
@@ -122,16 +122,20 @@ def cifar_tutorial(train_start=0, train_end=49000, test_start=0,
             report.clean_train_clean_eval = acc
             assert X_test.shape[0] == test_end - test_start, X_test.shape
             print('Test accuracy on legitimate examples: %0.4f' % acc)
-        resume = True
+
         ckpt_name = './cifar_model.ckpt'
         
-        if not resume:
+        if not FLAGS.resume:
             model_train(sess, x, y, preds, X_train, Y_train, evaluate=evaluate,
                         args=train_params, rng=rng)
-        saver.save(sess,ckpt_name)
-        if resume:
-            saver = tf.train.import_meta_graph(ckpt_name+'.meta')            
-        if not resume:
+            saver.save(sess,ckpt_name)
+        if FLAGS.resume:
+            saver = tf.train.import_meta_graph(ckpt_name+'.meta')
+            print ("loading pretrain model")
+            saver.restore(sess,ckpt_name)
+            acc = model_eval(sess, x, y, preds, X_test, Y_test, args=eval_par)
+            print('Test accuracy on pretrained model: %0.4f\n' % acc)
+        if not FLAGS.resume:
             import sys
             sys.exit()
         
@@ -147,9 +151,8 @@ def cifar_tutorial(train_start=0, train_end=49000, test_start=0,
         
         preds_adv = model.get_probs(adv_x)
         
-        eval_par = {'batch_size': batch_size}
         acc = model_eval(sess, x, y, preds_adv, X_test, Y_test, args=eval_par)
-        print('Test accuracy on adversarial examples: %0.4f\n' % acc)
+        print('Initially, Test accuracy on adversarial examples: %0.4f\n' % acc)
         
         # Calculate training error
         if testing:
@@ -158,13 +161,9 @@ def cifar_tutorial(train_start=0, train_end=49000, test_start=0,
                              Y_train, args=eval_par)
             report.train_clean_train_adv_eval = acc
         print ("start iterative pruning")
-        iterations = 10
-        learning_rate = 5e-4
-        inhibition_eps = 10
-        print ("learning rate %f iteration %d prune factor %d AE eps %f inhibition eps %f" %(learning_rate,iterations,prune_factor,eps,inhibition_eps))
-        do_pruning = True
-        if do_pruning:
-            for i in range(iterations):
+
+        if FLAGS.do_pruning:
+            for i in range(FLAGS.prune_iterations):
                 print ("iterative %d"  % (i))
                 dict_nzidx = model.apply_prune(sess)
                 trainer = tf.train.AdamOptimizer(learning_rate)
@@ -174,9 +173,9 @@ def cifar_tutorial(train_start=0, train_end=49000, test_start=0,
                 grads = model.apply_prune_on_grads(grads,dict_nzidx)
                 prune_args = {'trainer':trainer,'grads':grads}
                 train_params = {
-                    'nb_epochs':3,
+                    'nb_epochs':FLAGS.retrain_epoch,
                     'batch_size': batch_size,
-                    'learning_rate': 1e-3
+                    'learning_rate': FLAGS.retrain_lr
                     }
                 model_train(sess, x, y, preds, X_train, Y_train, evaluate=evaluate,
                             args=train_params, rng=rng,prune_args=prune_args,retrainindex = i)
@@ -184,9 +183,9 @@ def cifar_tutorial(train_start=0, train_end=49000, test_start=0,
                 eval_par = {'batch_size': batch_size}
                 acc = model_eval(sess, x, y, preds_adv, X_test, Y_test, args=eval_par)
                 print('Test accuracy on adversarial examples: %0.4f\n' % acc)
-        do_inhibition = True
-        if do_inhibition:
-            model.inhibition(sess,inhibition_eps)
+
+        if FLAGS.do_inhibition:
+            model.inhibition(sess,original_method = FLAGS.use_inhibition_original,inhibition_eps = FLAGS.inhibition_eps)
         eval_par = {'batch_size': batch_size}
         acc = model_eval(sess, x, y, preds_adv, X_test, Y_test, args=eval_par)
         print('Test accuracy on adversarial examples: %0.4f\n' % acc)
@@ -196,12 +195,13 @@ def cifar_tutorial(train_start=0, train_end=49000, test_start=0,
         report.clean_train_clean_eval = acc
         assert X_test.shape[0] == test_end - test_start, X_test.shape
         print('Test accuracy on legitimate examples: %0.4f' % acc)
-
+        
+        print ("trying FGSM attack")
         fgsm = FastGradientMethod(model, sess=sess)
         adv_x = fgsm.generate(x, **fgsm_params)
         preds_adv = model.get_probs(adv_x)
 
-        print ("try some other attacks")
+        print ("trying some other attacks")
 
         bim = BasicIterativeMethod(model,sess = sess)
         adv_x = bim.generate(x)
@@ -222,12 +222,22 @@ def main(argv=None):
 
 if __name__ == '__main__':
     flags.DEFINE_integer('nb_filters', 64, 'Model size multiplier')
-    flags.DEFINE_integer('nb_epochs', 2, 'Number of epochs to train model')
-    flags.DEFINE_integer('batch_size', 512, 'Size of training batches')
+    flags.DEFINE_integer('nb_epochs', 16, 'Number of epochs to train model')
+    flags.DEFINE_integer('batch_size', 200, 'Size of training batches')
     flags.DEFINE_float('learning_rate', 0.001, 'Learning rate for training')
     flags.DEFINE_bool('clean_train', True, 'Train on clean examples')
     flags.DEFINE_bool('backprop_through_attack', False,
                       ('If True, backprop through adversarial example '
                        'construction process during adversarial training'))
-
+    flags.DEFINE_integer('retrain_epoch',2,'Number of retrain before next pruning')
+    flags.DEFINE_float('fgsm_eps',0.3,'eps for fgsm')
+    flags.DEFINE_bool('use_inhibition_original',False,'true if you want to use original inhibition method. False if yo\
+    u want to use my modified version')
+    flags.DEFINE_integer('prune_iterations',20,'number of iteration for iterative pruning.')
+    flags.DEFINE_float('retrain_lr',1e-3,'lr for retraining')
+    flags.DEFINE_float('prune_factor',10,'how much percentage off. 10 as take 10 percent off')
+    flags.DEFINE_float('inhibition_eps',40,'recommend 0.1 for original, 10 for modified')
+    flags.DEFINE_bool('do_inhibition',True,'set True if you want to apply gradient inhibition')
+    flags.DEFINE_bool('do_pruning',True,'set True if you want to apply gradient inhibition')
+    flags.DEFINE_bool('resume',True,'set False if you want to train from scratch')
     tf.app.run()

@@ -112,7 +112,7 @@ class PruneableMLP(MLP):
                     grads_and_vars[count] = (tf.multiply(nzidx_obj, grad), var)
                 count += 1
         return grads_and_vars
-    def inhibition(self,sess,original_method = True, inhibition_eps = 0.1):
+    def inhibition(self,sess,original_method = False, inhibition_eps = 20):
         for layer in self.layers:
             if layer.weight_name in self.prune_percent:
                 print ("at %s do inhibition"% (layer.weight_name))
@@ -414,20 +414,25 @@ class Flatten(Layer):
         return tf.reshape(x, [-1, self.output_width])
 
 
-def make_basic_cnn(nb_filters=64, nb_classes=10,
+def make_basic_cnn(nb_filters=32, nb_classes=10,
                    input_shape=(None, 28, 28, 1),prune_percent=None):
-    layers = [Conv2D(nb_filters, (8, 8), (2, 2), "SAME",name='conv1_w'),
+    layers = [Conv2D(nb_filters, (3, 3), (1, 1), "SAME",name='conv1_w'),
               ReLU(),
-              Conv2D(nb_filters * 2, (6, 6), (2, 2), "VALID",name='conv2_w'),
+              Conv2D(nb_filters, (3, 3), (1, 1), "SAME",name='conv2_w'),
               ReLU(),
-              Conv2D(nb_filters * 2, (5, 5), (1, 1), "VALID",name='conv3_w'),
+              MaxPool(),
+              Conv2D(nb_filters * 2, (3, 3), (1, 1), "SAME",name='conv3_w'),
               ReLU(),
+              Conv2D(nb_filters * 2, (3, 3), (1, 1), "SAME",name='conv4_w'),
+              ReLU(),
+              MaxPool(),
               Flatten(),
-              Linear(1280,name='fc1_w'),
-              Linear(1280,name='fc2_w'),
+              Linear(200,name='fc1_w'),
+              ReLU(),
+              Linear(200,name='fc2_w'),
+              ReLU(),
               Linear(nb_classes,name='fc3_w'),
               Softmax()]
-
     model = PruneableMLP(layers, input_shape,prune_percent=prune_percent)
     return model
 def make_strong_cnn(nb_filters=64, nb_classes=10,
@@ -439,7 +444,7 @@ def make_strong_cnn(nb_filters=64, nb_classes=10,
               MaxPool(),
               Conv2D(nb_filters * 2, (3, 3), (1, 1), "SAME",name='conv3_w'),
               ReLU(),
-              Conv2D(nb_filters * 2, (3, 3), (1, 1), "SAME",name='conv3_w'),
+              Conv2D(nb_filters * 2, (3, 3), (1, 1), "SAME",name='conv4_w'),
               ReLU(),
               MaxPool(),
               Flatten(),
