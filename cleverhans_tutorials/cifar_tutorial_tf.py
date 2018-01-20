@@ -21,7 +21,7 @@ from keras.datasets import cifar10
 from cleverhans.utils_tf import model_train, model_eval,model_loss,initialize_uninitialized_global_variables
 from cleverhans.attacks import FastGradientMethod
 from cleverhans.attacks import SaliencyMapMethod
-from cleverhans.attacks import BasicIterativeMethod
+from cleverhans.attacks import ElasticNetMethod
 from cleverhans_tutorials.tutorial_models import make_basic_cnn,make_resnet,make_strong_cnn
 from cleverhans.utils import AccuracyReport, set_log_level
 
@@ -160,9 +160,10 @@ def cifar_tutorial(train_start=0, train_end=49000, test_start=0,
             acc = model_eval(sess, x, y, preds_adv, X_train,
                              Y_train, args=eval_par)
             report.train_clean_train_adv_eval = acc
-        print ("start iterative pruning")
 
-        if FLAGS.do_pruning:
+
+        if not FLAGS.load_pruned_model:
+            print ("start iterative pruning")
             for i in range(FLAGS.prune_iterations):
                 print ("iterative %d"  % (i))
                 dict_nzidx = model.apply_prune(sess)
@@ -183,12 +184,17 @@ def cifar_tutorial(train_start=0, train_end=49000, test_start=0,
                 eval_par = {'batch_size': batch_size}
                 acc = model_eval(sess, x, y, preds_adv, X_test, Y_test, args=eval_par)
                 print('Test accuracy on adversarial examples: %0.4f\n' % acc)
-
+            saver.save(sess,'./pruned_cifar_model.ckpt')
+        else:
+            print ("load pruned model")
+            saver = tf.train.import_meta_graph('./pruned_cifar_model.ckpt.meta')
+            saver.restore(sess,'./pruned_cifar_model.ckpt')
+        
         if FLAGS.do_inhibition:
             model.inhibition(sess,original_method = FLAGS.use_inhibition_original,inhibition_eps = FLAGS.inhibition_eps)
         eval_par = {'batch_size': batch_size}
         acc = model_eval(sess, x, y, preds_adv, X_test, Y_test, args=eval_par)
-        print('Test accuracy on adversarial examples: %0.4f\n' % acc)
+        print('Test accuracy on adversarial examples by fgsm: %0.4f\n' % acc)
         eval_params = {'batch_size': batch_size}
         acc = model_eval(
             sess, x, y, preds, X_test, Y_test, args=eval_params)
@@ -196,20 +202,19 @@ def cifar_tutorial(train_start=0, train_end=49000, test_start=0,
         assert X_test.shape[0] == test_end - test_start, X_test.shape
         print('Test accuracy on legitimate examples: %0.4f' % acc)
         
-        print ("trying FGSM attack")
-        fgsm = FastGradientMethod(model, sess=sess)
-        adv_x = fgsm.generate(x, **fgsm_params)
-        preds_adv = model.get_probs(adv_x)
+        '''
+        some weird error occured
+        Cannot feed value of shape (2, 32, 32, 3) for Tensor u'assign_timg:0', which has shape '(9, 32, 32, 3)
+        we need to investigate this together
+        print ("trying c&w attack")
 
-        print ("trying some other attacks")
-
-        bim = BasicIterativeMethod(model,sess = sess)
-        adv_x = bim.generate(x)
+        c_w = ElasticNetMethod(model,sess = sess)
+        adv_x = c_w.generate(x)
         preds_adv = model.get_probs(adv_x)
         eval_par = {'batch_size': batch_size}
         acc = model_eval(sess, x, y, preds_adv, X_test, Y_test, args=eval_par)
-        print('Test accuracy on adversarial examples after model prunning: %0.4f\n' % acc)
-
+        print('Test accuracy on adversarial examples: %0.4f\n' % acc)
+        '''
 
 
 def main(argv=None):
@@ -236,8 +241,8 @@ if __name__ == '__main__':
     flags.DEFINE_integer('prune_iterations',20,'number of iteration for iterative pruning.')
     flags.DEFINE_float('retrain_lr',1e-3,'lr for retraining')
     flags.DEFINE_float('prune_factor',10,'how much percentage off. 10 as take 10 percent off')
-    flags.DEFINE_float('inhibition_eps',40,'recommend 0.1 for original, 10 for modified')
+    flags.DEFINE_float('inhibition_eps',1000,'recommend 0.1 for original, 10 for modified')
     flags.DEFINE_bool('do_inhibition',True,'set True if you want to apply gradient inhibition')
-    flags.DEFINE_bool('do_pruning',True,'set True if you want to apply gradient inhibition')
+    flags.DEFINE_bool('load_pruned_model',True,'set True if you want to load pruned model')
     flags.DEFINE_bool('resume',True,'set False if you want to train from scratch')
     tf.app.run()

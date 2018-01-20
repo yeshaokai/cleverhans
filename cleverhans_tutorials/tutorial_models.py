@@ -112,10 +112,11 @@ class PruneableMLP(MLP):
                     grads_and_vars[count] = (tf.multiply(nzidx_obj, grad), var)
                 count += 1
         return grads_and_vars
+
     def inhibition(self,sess,original_method = False, inhibition_eps = 20):
         for layer in self.layers:
-            if layer.weight_name in self.prune_percent:
-                print ("at %s do inhibition"% (layer.weight_name))
+            if layer.weight_name in self.prune_percent and 'conv' not in layer.weight_name:
+               
                 weight_arr = None
                 if isinstance(layer,Conv2D):
                     weight_arr = sess.run(layer.kernels)
@@ -127,13 +128,18 @@ class PruneableMLP(MLP):
                 temp[weight_arr>0] = 1
                 temp[weight_arr<0] = -1
                 if original_method:
+                    print ("at %s do inhibition"% (layer.weight_name))
                     weight_arr += inhibition_eps*temp
                 else:
+                  
+                    if 'fc1_w' in layer.weight_name or 'fc2_w' in layer.weight_name:
+                        continue
+                    print ("using modified gradient inhibition")
+                    print ("at %s do inhibition"% (layer.weight_name))
                     weight_arr += weight_arr*inhibition_eps
                 if isinstance(layer,Conv2D):
                     sess.run(layer.kernels.assign(weight_arr))
                 elif isinstance(layer,Linear):
-
                     sess.run(layer.W.assign(weight_arr))
                 else:
                     continue

@@ -144,10 +144,11 @@ def mnist_tutorial(train_start=0, train_end=60000, test_start=0,
 
         acc = model_eval(sess, x, y, preds_adv, X_test, Y_test, args=eval_par)
         print('Test accuracy on adversarial examples: %0.4f\n' % acc)        
-        print ("start iterative pruning")
+
         preds = model.get_probs(x)
         loss = model_loss(y,preds)
-        if FLAGS.do_pruning:
+        if not FLAGS.load_pruned_model:
+            print ("start iterative pruning")
             for i in range(FLAGS.prune_iterations):
                 print ("iterative %d"  % (i))
                 start = time.time()
@@ -171,11 +172,14 @@ def mnist_tutorial(train_start=0, train_end=60000, test_start=0,
                 eval_par = {'batch_size': batch_size}
                 acc = model_eval(sess, x, y, preds_adv, X_test, Y_test, args=eval_par)
                 print('Test accuracy on adversarial examples: %0.4f\n' % acc)
+            saver.save(sess,'./pruned_mnist_model.ckpt')
+        else:
+            print ("loading pruned model")
+            saver = tf.train.import_meta_graph('./pruned_mnist_model.ckpt.meta')
+            saver.restore(sess,'./pruned_mnist_model.ckpt')
         if FLAGS.do_inhibition:
             model.inhibition(sess,original_method = FLAGS.use_inhibition_original,inhibition_eps = FLAGS.inhibition_eps)
-        eval_par = {'batch_size': batch_size}
-        acc = model_eval(sess, x, y, preds_adv, X_test, Y_test, args=eval_par)
-        print('Test accuracy on adversarial examples: %0.4f\n' % acc)
+
         eval_params = {'batch_size': batch_size}
         acc = model_eval(
             sess, x, y, preds, X_test, Y_test, args=eval_params)
@@ -223,6 +227,6 @@ if __name__ == '__main__':
     flags.DEFINE_float('prune_factor',10,'how much percentage off. 10 as take 10 percent off')
     flags.DEFINE_float('inhibition_eps',20,'recommend 0.1 for original, 20 for modified')
     flags.DEFINE_bool('do_inhibition',True,'set True if you want to apply gradient inhibition')
-    flags.DEFINE_bool('do_pruning',True,'set True if you want to apply gradient inhibition')
+    flags.DEFINE_bool('load_pruned_model',True,'set True if you want to load from the pruned model')
     flags.DEFINE_bool('resume',True,'set False if you want to train from scratch')
     tf.app.run()
