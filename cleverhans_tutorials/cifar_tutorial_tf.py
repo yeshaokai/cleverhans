@@ -146,7 +146,7 @@ def cifar_tutorial(train_start=0, train_end=49000, test_start=0,
         model.test_mode()
         #sess.run(tf.global_variables_initializer())
         initialize_uninitialized_global_variables(sess)
-
+        eval_par = {'batch_size': batch_size}
         adv_x = fgsm.generate(x, **fgsm_params)
         
         preds_adv = model.get_probs(adv_x)
@@ -189,17 +189,20 @@ def cifar_tutorial(train_start=0, train_end=49000, test_start=0,
             print ("load pruned model")
             saver = tf.train.import_meta_graph('./pruned_cifar_model.ckpt.meta')
             saver.restore(sess,'./pruned_cifar_model.ckpt')
-        
+            print ("before applying gradient inhibition")
+            acc = model_eval(sess, x, y, preds_adv, X_test, Y_test, args=eval_par)
+            print('Test accuracy on adversarial examples by fgsm: %0.4f' % acc)
+            acc = model_eval(
+                    sess, x, y, preds, X_test, Y_test, args=eval_par)
+            print('Test accuracy on legitimate examples: %0.4f' % acc)
         if FLAGS.do_inhibition:
             model.inhibition(sess,original_method = FLAGS.use_inhibition_original,inhibition_eps = FLAGS.inhibition_eps)
-        eval_par = {'batch_size': batch_size}
+
         acc = model_eval(sess, x, y, preds_adv, X_test, Y_test, args=eval_par)
         print('Test accuracy on adversarial examples by fgsm: %0.4f\n' % acc)
-        eval_params = {'batch_size': batch_size}
+
         acc = model_eval(
-            sess, x, y, preds, X_test, Y_test, args=eval_params)
-        report.clean_train_clean_eval = acc
-        assert X_test.shape[0] == test_end - test_start, X_test.shape
+            sess, x, y, preds, X_test, Y_test, args=eval_par)
         print('Test accuracy on legitimate examples: %0.4f' % acc)
         
         '''
