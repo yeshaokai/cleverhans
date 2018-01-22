@@ -248,4 +248,9 @@ if __name__ == '__main__':
     flags.DEFINE_bool('do_inhibition',True,'set True if you want to apply gradient inhibition')
     flags.DEFINE_bool('load_pruned_model',True,'set True if you want to load pruned model')
     flags.DEFINE_bool('resume',True,'set False if you want to train from scratch')
+    flags.DEFINE_boolean('viz_enabled', True, 'Visualize adversarial ex.')
+    flags.DEFINE_boolean('attack_iterations', 100,
+                         'Number of iterations to run attack; 1000 is good')
+    flags.DEFINE_boolean('targeted', True,
+                         'Run the tutorial in targeted mode?')
     tf.app.run()
