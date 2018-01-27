@@ -419,7 +419,26 @@ class Flatten(Layer):
     def fprop(self, x):
         return tf.reshape(x, [-1, self.output_width])
 
-
+def make_compare_cnn(nb_filters=32, nb_classes=10,
+                   input_shape=(None, 28, 28, 1),prune_percent=None):
+    with tf.variable_scope('compare'):
+        layers = [Conv2D(nb_filters, (3, 3), (1, 1), "SAME",name='conv1_w'),
+              ReLU(),
+              Conv2D(nb_filters, (3, 3), (1, 1), "SAME",name='conv2_w'),
+              ReLU(),
+              MaxPool(),
+              Conv2D(nb_filters * 2, (3, 3), (1, 1), "SAME",name='conv3_w'),
+              ReLU(),
+              MaxPool(),
+              Flatten(),
+              Linear(200,name='fc1_w'),
+              ReLU(),
+              Linear(200,name='fc2_w'),
+              ReLU(),
+              Linear(nb_classes,name='fc3_w'),
+              Softmax()]
+        model = PruneableMLP(layers, input_shape,prune_percent=prune_percent)
+        return model
 def make_basic_cnn(nb_filters=32, nb_classes=10,
                    input_shape=(None, 28, 28, 1),prune_percent=None):
     layers = [Conv2D(nb_filters, (3, 3), (1, 1), "SAME",name='conv1_w'),
