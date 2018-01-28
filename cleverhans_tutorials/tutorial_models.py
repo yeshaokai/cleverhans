@@ -56,9 +56,33 @@ class PruneableMLP(MLP):
         for layer in self.layers:
             if isinstance(layer,BN):
                 layer.test_mode()
-    def update(self):
-        # update computational graph after pruning
-        pass
+    def vis_weights(self,sess,name ='fc3_w',title='no title'):
+        import pandas as pd
+        import matplotlib.pyplot as plt
+        import matplotlib
+        import operator
+        #matplotlib.use('Agg')
+        array = []
+        weight_arr = None
+        for layer in self.layers:
+            if isinstance(layer,Conv2D):
+                weight_arr = sess.run(layer.kernels)
+            elif isinstance(layer,Linear):
+                weight_arr = sess.run(layer.W)
+            else:
+                continue
+            #nonzero = weight_arr[weight_arr!=0]
+            weight_arr = weight_arr.reshape(-1)
+            nonzero = list(weight_arr)
+            #print (nonzero.shape)
+            array.append(nonzero)
+        array = reduce(operator.add,array)
+        data = pd.DataFrame(array)
+        data.hist(bins=200,log = True)
+        plt.title(title)
+        plt.ylabel('occurences')
+        plt.show()
+                
     def prune_weight(self,weight_arr,weight_name):
         percent = self.prune_percent[weight_name]
         non_zero_weight_arr = weight_arr[weight_arr!=0]

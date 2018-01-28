@@ -122,7 +122,8 @@ def mnist_tutorial(train_start=0, train_end=60000, test_start=0,
             sess, x1, y1, preds1, X_test, Y_test, args=eval_par)
         report.clean_train_clean_eval = acc
         assert X_test.shape[0] == test_end - test_start, X_test.shape
-        print('Test accuracy on legitimate examples: %0.4f' % acc)        
+        print('Test accuracy on legitimate examples: %0.4f' % acc)
+    '''
     x1 = tf.placeholder(tf.float32, shape=(None, 28, 28, 1))
     y1 = tf.placeholder(tf.float32, shape=(None, 10))
     model1 = make_compare_cnn(nb_filters=nb_filters,prune_percent=prune_percent)
@@ -131,7 +132,7 @@ def mnist_tutorial(train_start=0, train_end=60000, test_start=0,
     adv_x1 = fgsm1.generate(x1, **fgsm_params)
     preds_adv1 = model1.get_probs(adv_x1)
     model_train(sess,x1,y1,preds1,X_train,Y_train,evaluate = evaluate1,args = train_params,rng = rng)
-    
+    '''
     #####
 
     if clean_train:
@@ -183,6 +184,8 @@ def mnist_tutorial(train_start=0, train_end=60000, test_start=0,
             print ("loading pretrain model")
             saver.restore(sess,ckpt_name)
             acc = model_eval(sess, x, y, preds, X_test, Y_test, args=eval_par)
+            model.vis_weights(sess,title='before pruning')
+
             print('Test accuracy on pretrained model: %0.4f\n' % acc)
         if not FLAGS.resume:
             import sys
@@ -383,9 +386,11 @@ def mnist_tutorial(train_start=0, train_end=60000, test_start=0,
 
             return report
         print ("before pruning and gradient inhibition\n")
+        '''
         fgsm_combo()
         do_cw()
         do_jsma()
+        '''
         preds = model.get_probs(x)
         loss = model_loss(y,preds)
         if not FLAGS.load_pruned_model:
@@ -418,19 +423,22 @@ def mnist_tutorial(train_start=0, train_end=60000, test_start=0,
             print ("loading pruned model")
             saver = tf.train.import_meta_graph('./pruned_mnist_model.ckpt.meta')
             saver.restore(sess,'./pruned_mnist_model.ckpt')
+            
             print ("before  applying gradient inhibition")
-            fgsm_combo()
+            #fgsm_combo()
             print("before gradient inhibition, doing c&w")
-            do_cw()
-            do_jsma()
+            #do_cw()
+            #do_jsma()
+            model.vis_weights(sess,title='after pruning')
         if FLAGS.do_inhibition:
             model.inhibition(sess,original_method = FLAGS.use_inhibition_original,inhibition_eps = FLAGS.inhibition_eps)
+            model.vis_weights(sess,title='after gradient inhibition')
 
-
+        '''
         fgsm_combo()
         do_cw()
         do_jsma()
-
+        '''
 
 
 
@@ -445,7 +453,7 @@ def main(argv=None):
 
 if __name__ == '__main__':
     flags.DEFINE_integer('nb_filters', 32, 'Model size multiplier')
-    flags.DEFINE_integer('nb_epochs', 12, 'Number of epochs to train model')
+    flags.DEFINE_integer('nb_epochs', 1, 'Number of epochs to train model')
     flags.DEFINE_integer('batch_size', 1024, 'Size of training batches')
     flags.DEFINE_float('learning_rate', 0.001, 'Learning rate for training')
     flags.DEFINE_bool('clean_train', True, 'Train on clean examples')
